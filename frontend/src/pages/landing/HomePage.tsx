@@ -19,7 +19,7 @@ const LiveTelemetryNodeWidget: React.FC = memo(() => {
   const [cpuUsage, setCpuUsage] = useState<number>(24.8);
   const [activeTab, setActiveTab] = useState<'analytics' | 'network' | 'thermals'>('analytics');
 
-  // Magaan na numeric update (Dito lang sa maliit na box tumatakbo)
+  // Lightweight numeric update (Runs only inside the compact metric box)
   useEffect(() => {
     const timer = setInterval(() => {
       setTelemetryCount((prev) => prev + Math.floor(Math.random() * 12) + 4);
@@ -342,7 +342,7 @@ export const HomePage: React.FC = () => {
             {/* Card 2 */}
             <div className="bento-3d-card relative rounded-3xl overflow-hidden h-80 group border border-white/10 shadow-xl bg-slate-900">
               <img
-                src="https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=600"
+                src="https://images.unsplash.com/photo-1522071820081-009f0129c71°C?auto=format&fit=crop&q=80&w=600"
                 alt="Digital Telemetry"
                 loading="lazy"
                 decoding="async"
@@ -711,3 +711,7 @@ export const HomePage: React.FC = () => {
 };
 
 export default HomePage;
+
+
+
+

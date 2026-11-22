@@ -1,3 +1,4 @@
+import '@/components/SkeletonLoader3D';
 import React, { useState, createContext, useContext, useRef, useEffect } from 'react';
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Cpu, Moon, Sun, Menu, X } from "lucide-react";
@@ -39,7 +40,7 @@ export const LandingLayout: React.FC = () => {
     };
   }, []);
 
-  // 2. MAGAAN AT ZERO-LAG NA GPU CROSSFADE LOOP (Walang requestAnimationFrame overhead)
+  // 2. LIGHTWEIGHT ZERO-LAG GPU CROSSFADE LOOP
   useEffect(() => {
     const vidA = videoARef.current;
     const vidB = videoBRef.current;
@@ -53,7 +54,7 @@ export const LandingLayout: React.FC = () => {
     vidA.currentTime = 0;
     vidA.play().catch(() => {});
 
-    const FADE_TIME = 0.75; // 0.75s overlap bago matapos para walang makikitang cut
+    const FADE_TIME = 0.75; // 0.75s overlap before end for seamless transition
 
     const onTimeUpdateA = () => {
       if (frontPlayer !== 'A' || isSwitchingRef.current || !vidA.duration) return;

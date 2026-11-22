@@ -1,292 +1,282 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-
-const ConfiguredBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
+import axios from 'axios';
 
 export const getDynamicBackendBaseUrl = (): string => {
-  if (ConfiguredBaseUrl) return ConfiguredBaseUrl;
+  const envUrl = (import.meta as any)?.env?.VITE_API_BASE_URL || (import.meta as any)?.env?.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim().length > 0) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
   if (typeof window !== 'undefined') {
-    return '';
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:5000`;
   }
   return 'http://localhost:5000';
 };
 
 export const getDirectBackendUrl = (): string => {
-  if (ConfiguredBaseUrl) return ConfiguredBaseUrl;
-  if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:5000`;
-  }
-  return 'http://localhost:5000';
+  return getDynamicBackendBaseUrl();
 };
 
 export const getPythonAiBackendUrl = (): string => {
-  const configuredAi = (import.meta.env.VITE_AI_SERVICE_URL || '').trim();
-  if (configuredAi) return configuredAi;
+  const envAi = (import.meta as any)?.env?.VITE_PYTHON_AI_URL;
+  if (envAi && typeof envAi === 'string' && envAi.trim().length > 0) {
+    return envAi.trim().replace(/\/+$/, '');
+  }
   if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:8000`;
   }
   return 'http://localhost:8000';
 };
 
-const getStoredUserId = (): string => {
-  try {
-    const raw = sessionStorage.getItem('labtrack_user') || localStorage.getItem('labtrack_user');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed?.id) return String(parsed.id);
-    }
-  } catch {}
-  return '00000000-0000-0000-0000-000000000001';
-};
-
 export const collectLiveUiUxContext = (overrideRole?: string) => {
-  if (typeof window === 'undefined') return {};
-  try {
-    const path = window.location.pathname || '/';
-    const search = window.location.search || '';
-    const params = new URLSearchParams(search);
-
-    let storedUser: any = {};
-    const rawUser =
-      sessionStorage.getItem('labtrack_user') ||
-      localStorage.getItem('labtrack_user') ||
-      localStorage.getItem('jrmsu_labtrack_user');
-    if (rawUser) {
-      try { storedUser = JSON.parse(rawUser); } catch {}
-    }
-
-    let pcCode =
-      params.get('pc') ||
-      params.get('workstation') ||
-      params.get('ws') ||
-      sessionStorage.getItem('labtrack_workstation') ||
-      localStorage.getItem('labtrack_workstation') ||
-      '';
-    let labName =
-      params.get('lab') ||
-      params.get('laboratory') ||
-      sessionStorage.getItem('labtrack_lab') ||
-      localStorage.getItem('labtrack_lab') ||
-      '';
-
-    for (const store of [sessionStorage, localStorage]) {
-      for (let i = 0; i < store.length; i++) {
-        const k = store.key(i) || '';
-        if (/session|pc|workstation|student/i.test(k)) {
-          const val = store.getItem(k) || '';
-          if (val.startsWith('{')) {
-            try {
-              const obj = JSON.parse(val);
-              if (!pcCode && (obj.workstationCode || obj.workstationNumber || obj.pcName || obj.code)) {
-                pcCode = String(obj.workstationCode || obj.workstationNumber || obj.pcName || obj.code);
-              }
-              if (!labName && (obj.labName || obj.laboratoryName || obj.roomName)) {
-                labName = String(obj.labName || obj.laboratoryName || obj.roomName);
-              }
-            } catch {}
-          }
-        }
-      }
-    }
-
-    const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-      .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
-      .filter((t) => t.length > 2 && !/labtrack ai assistant/i.test(t))
-      .slice(0, 6);
-
-    const activeButtons = Array.from(document.querySelectorAll('button, a'))
-      .filter((el) => {
-        const cls = (el.className || '').toString();
-        return /bg-blue|bg-indigo|bg-emerald|bg-\[#1e5352\]|border-blue|font-black/i.test(cls);
-      })
-      .map((el) => (el.textContent || '').trim().replace(/\s+/g, ' '))
-      .filter((t) => t.length > 2 && t.length < 40)
-      .slice(0, 6);
-
-    const visibleText = (document.body?.innerText || '').replace(/\s+/g, ' ');
-    if (!pcCode) {
-      const m = visibleText.match(/\b(WS-\d+|PC-\d+)\b/i);
-      if (m) pcCode = m[1].toUpperCase();
-    }
-    if (!labName) {
-      const m = visibleText.match(/\b(Main Lab|ComLab\s*\d+|IT Lab\s*\w+)\b/i);
-      if (m) labName = m[1];
-    }
-
-    const detectedRole =
-      overrideRole ||
-      (path.startsWith('/admin')
-        ? 'ADMIN'
-        : path.startsWith('/instructor')
-        ? 'INSTRUCTOR'
-        : path.startsWith('/student')
-        ? 'STUDENT'
-        : storedUser?.role || 'GUEST');
-
-    return {
-      role: detectedRole,
-      userName: detectedRole === 'GUEST' ? '' : (storedUser?.fullName || storedUser?.name || storedUser?.username || ''),
-      userEmail: storedUser?.email || '',
-      studentIdNumber: storedUser?.idNumber || storedUser?.studentNumber || '',
-      campus: 'JRMSU Dapitan Main Campus',
-      path,
-      fullUrl: window.location.href,
-      pageTitle: headings[0] || document.title || 'LabTrack System Page',
-      uiHeadings: headings,
-      activeUiTabs: activeButtons,
-      workstationCode: detectedRole === 'GUEST' ? '' : (pcCode || 'WS-02'),
-      laboratoryName: detectedRole === 'GUEST' ? '' : (labName || 'Main Lab (RM-100)'),
-    };
-  } catch {
-    return {};
+  if (typeof window === 'undefined') {
+    return { role: overrideRole || 'GUEST', path: '/', timestamp: new Date().toISOString() };
   }
+  return {
+    role: overrideRole || localStorage.getItem('labtrack_role') || 'USER',
+    path: window.location.pathname,
+    campus: localStorage.getItem('labtrack_selected_campus') || 'Main Campus (Dapitan)',
+    timestamp: new Date().toISOString(),
+  };
 };
 
 export const apiClient = axios.create({
   baseURL: getDynamicBackendBaseUrl(),
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
-    Accept: 'application/json',
   },
-  timeout: 25000,
 });
 
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token =
-      sessionStorage.getItem('labtrack_token') ||
-      localStorage.getItem('labtrack_token') ||
-      localStorage.getItem('labtrack_access_token') ||
-      localStorage.getItem('jrmsu_labtrack_auth_token');
-
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    if (config.url) {
-      // 1. Automatically enrich ALL AI Chat calls (Global, Admin, Instructor) with live UI/UX DOM context
-      if (config.url.includes('/api/v1/ai/chat') && config.method?.toLowerCase() === 'post') {
-        const body = typeof config.data === 'string' ? JSON.parse(config.data || '{}') : (config.data || {});
-        let parsedCtx: any = {};
-        if (body.systemContext) {
-          try {
-            parsedCtx = typeof body.systemContext === 'string' ? JSON.parse(body.systemContext) : body.systemContext;
-          } catch {}
-        }
-        const liveUi = collectLiveUiUxContext(body.role || parsedCtx.role);
-        const mergedCtx = { ...liveUi, ...parsedCtx, uiHeadings: liveUi.uiHeadings, activeUiTabs: liveUi.activeUiTabs };
-        config.data = {
-          ...body,
-          prompt: body.prompt || body.message || body.query || '',
-          role: mergedCtx.role || 'ADMIN',
-          systemContext: JSON.stringify(mergedCtx),
-        };
-      }
-
-      // 2. Notifications route normalization
-      if (config.url === '/api/v1/notifications/broadcast' && config.method?.toLowerCase() === 'post') {
-        config.url = '/api/v1/notifications';
-        const body = typeof config.data === 'string' ? JSON.parse(config.data || '{}') : (config.data || {});
-        config.data = {
-          userId: body.userId || getStoredUserId(),
-          title: body.title || body.subject || 'System Broadcast',
-          message: body.message || body.details || body.content || 'System announcement',
-          type: body.type || body.severity || 'INFO',
-        };
-      } else if (config.url === '/api/v1/admin/notifications') {
-        config.url = '/api/v1/notifications';
-      } else if (config.url === '/api/v1/notifications/mark-all-read') {
-        config.url = '/api/v1/notifications/read-all';
-      }
-
-      // 3. PC Usage session delete -> end-session-release normalization
-      const pcUsageDeleteMatch = config.url.match(/^\/api\/v1\/pc-usage\/([0-9a-fA-F-]{36})$/);
-      if (pcUsageDeleteMatch && config.method?.toLowerCase() === 'delete') {
-        config.method = 'post';
-        config.url = `/api/v1/pc-usage/end-session-release/${pcUsageDeleteMatch[1]}`;
-        config.data = {};
-      }
-
-      // 4. Users /me route normalization
-      if (config.url === '/api/v1/users/me') {
-        config.url = `/api/v1/users/${getStoredUserId()}`;
-      }
-
-      // 5. Heartbeat normalizer
-      if (config.url.includes('/api/v1/pc-usage/heartbeat') && config.method?.toLowerCase() === 'post') {
-        const hbBody = typeof config.data === 'string' ? JSON.parse(config.data || '{}') : (config.data || {});
-        config.data = {
-          sessionId: hbBody.sessionId || '00000000-0000-0000-0000-000000000001',
-          qrToken: hbBody.qrToken || 'AUTO',
-          workstationCode: hbBody.workstationCode || 'PC-001',
-        };
+  (config) => {
+    if (typeof window !== 'undefined') {
+      const token =
+        sessionStorage.getItem('labtrack_token') ||
+        localStorage.getItem('labtrack_token') ||
+        localStorage.getItem('jrmsu_labtrack_auth_token');
+      if (token && config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
     }
-
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-apiClient.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & {
-      _directFallback?: boolean;
-      _pyFallback?: boolean;
-    };
-
-    if (
-      originalRequest &&
-      !originalRequest._directFallback &&
-      (!error.response || error.response.status === 502 || error.response.status === 504) &&
-      !originalRequest.baseURL
-    ) {
-      originalRequest._directFallback = true;
-      originalRequest.baseURL = getDirectBackendUrl();
-      return apiClient(originalRequest);
-    }
-
-    if (
-      originalRequest &&
-      !originalRequest._pyFallback &&
-      (originalRequest.url || '').includes('/api/v1/ai/chat')
-    ) {
-      originalRequest._pyFallback = true;
-      try {
-        const rawData = typeof originalRequest.data === 'string'
-          ? JSON.parse(originalRequest.data || '{}')
-          : (originalRequest.data || {});
-        const pyRes = await axios.post(`${getPythonAiBackendUrl()}/api/v1/ai/chat`, {
-          prompt: rawData.prompt || rawData.message || rawData.query || 'Status check',
-          system_context: rawData.systemContext || rawData.system_context || JSON.stringify(collectLiveUiUxContext(rawData.role)),
-          session_id: rawData.sessionId || rawData.session_id,
-        });
-        return {
-          ...pyRes,
-          data: {
-            success: true,
-            data: pyRes.data,
-            response: pyRes.data?.response,
-          },
-        };
-      } catch {}
-    }
-
-    return Promise.reject(error);
-  }
-);
-
 export const unwrapApiData = <T = any>(res: any): T => {
-  if (res?.data?.data !== undefined) return res.data.data as T;
-  if (res?.data !== undefined) return res.data as T;
+  if (!res) return res;
+  if (res.data !== undefined && res.data?.data !== undefined) return res.data.data as T;
+  if (res.data !== undefined) return res.data as T;
   return res as T;
 };
 
 export const unwrapPaginatedItems = <T = any>(res: any): T[] => {
-  const payload = unwrapApiData<any>(res);
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.items)) return payload.items;
+  const data = unwrapApiData<any>(res);
+  if (Array.isArray(data)) return data as T[];
+  if (Array.isArray(data?.items)) return data.items as T[];
+  if (Array.isArray(data?.results)) return data.results as T[];
+  if (Array.isArray(data?.data)) return data.data as T[];
   return [];
+};
+
+export interface PaginationQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  campus?: string;
+  status?: string;
+  [key: string]: any;
+}
+
+export interface AiChatPayload {
+  sessionId?: string;
+  [key: string]: any;
+  prompt?: string;
+  message?: string;
+  query?: string;
+  role?: string;
+  campus?: string;
+  mode?: string;
+  context?: any;
+  history?: any[];
+  image?: string | null;
+}
+
+export interface AiChatNormalizedResult {
+  response?: string;
+  message?: string;
+  text?: string;
+  [key: string]: any;
+  reply: string;
+  mode?: string;
+  suggestions?: string[];
+  mediaUrl?: string;
+  raw?: any;
+}
+
+export const AuthApi = {
+  login: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/auth/login', payload)),
+  register: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/auth/register', payload)),
+  me: async () => unwrapApiData(await apiClient.get('/api/v1/auth/me')),
+  logout: async () => unwrapApiData(await apiClient.post('/api/v1/auth/logout')),
+};
+
+export const AiApi = {
+  chat: async (payload: AiChatPayload): Promise<AiChatNormalizedResult> => {
+    const textPrompt = payload.prompt || payload.message || payload.query || '';
+    try {
+      const res = await apiClient.post('/api/v1/ai/chat', {
+        ...payload,
+        prompt: textPrompt,
+        message: textPrompt,
+        uiContext: collectLiveUiUxContext(payload.role),
+      });
+      const data = unwrapApiData<any>(res);
+      return {
+        reply: data?.reply || data?.response || data?.message || data?.text || 'AI response received.',
+        mode: data?.mode || payload.mode || 'text',
+        suggestions: data?.suggestions || [],
+        mediaUrl: data?.mediaUrl || data?.imageUrl,
+        raw: data,
+      };
+    } catch {
+      const pyRes = await axios.post(`${getPythonAiBackendUrl()}/api/ai/chat`, {
+        ...payload,
+        prompt: textPrompt,
+        message: textPrompt,
+      });
+      const data = pyRes.data;
+      return {
+        reply: data?.reply || data?.response || data?.message || 'AI Assistant is ready.',
+        mode: data?.mode || payload.mode || 'text',
+        suggestions: data?.suggestions || [],
+        raw: data,
+      };
+    }
+  },
+};
+
+export const LaboratoriesApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/laboratories', { params })),
+  getById: async (id: string) => unwrapApiData(await apiClient.get(`/api/v1/laboratories/${id}`)),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/laboratories', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/laboratories/${id}`, payload)),
+  remove: async (id: string) => unwrapApiData(await apiClient.delete(`/api/v1/laboratories/${id}`)),
+};
+
+export const WorkstationsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/workstations', { params })),
+  getById: async (id: string) => unwrapApiData(await apiClient.get(`/api/v1/workstations/${id}`)),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/workstations', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/workstations/${id}`, payload)),
+  remove: async (id: string) => unwrapApiData(await apiClient.delete(`/api/v1/workstations/${id}`)),
+};
+
+export const AssetsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/assets', { params })),
+  getById: async (id: string) => unwrapApiData(await apiClient.get(`/api/v1/assets/${id}`)),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/assets', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/assets/${id}`, payload)),
+  remove: async (id: string) => unwrapApiData(await apiClient.delete(`/api/v1/assets/${id}`)),
+};
+
+export const PcUsageApi = {
+  getActiveSessions: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/sessions', { params })),
+  startSession: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/sessions/start', payload)),
+  endSession: async (id: string, payload?: any) => unwrapApiData(await apiClient.post(`/api/v1/sessions/${id}/end`, payload)),
+};
+
+export const ProblemReportsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/problem-reports', { params })),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/problem-reports', payload)),
+  updateStatus: async (id: string, status: string) => unwrapApiData(await apiClient.patch(`/api/v1/problem-reports/${id}/status`, { status })),
+};
+
+export const RepairTicketsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/repair-tickets', { params })),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/repair-tickets', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/repair-tickets/${id}`, payload)),
+};
+
+export const MaintenanceApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/maintenance', { params })),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/maintenance', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/maintenance/${id}`, payload)),
+};
+
+export const ReservationsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/reservations', { params })),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/reservations', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/reservations/${id}`, payload)),
+  remove: async (id: string) => unwrapApiData(await apiClient.delete(`/api/v1/reservations/${id}`)),
+};
+
+export const NotificationsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/notifications', { params })),
+  markAsRead: async (id: string) => unwrapApiData(await apiClient.patch(`/api/v1/notifications/${id}/read`)),
+};
+
+export const UsersApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/users', { params })),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/users', payload)),
+  update: async (id: string, payload: any) => unwrapApiData(await apiClient.put(`/api/v1/users/${id}`, payload)),
+  remove: async (id: string) => unwrapApiData(await apiClient.delete(`/api/v1/users/${id}`)),
+};
+
+export const AnalyticsApi = {
+  getSummary: async (params?: any) => unwrapApiData(await apiClient.get('/api/v1/analytics/summary', { params })),
+};
+
+export const FinancialsApi = {
+  getSummary: async () => unwrapApiData(await apiClient.get('/api/v1/financials/summary')),
+  getTransactions: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/financials/transactions', { params })),
+  getTransactionById: async (id: string) => unwrapApiData(await apiClient.get(`/api/v1/financials/transactions/${id}`)),
+  createTransaction: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/financials/transactions', payload)),
+};
+
+export const AuditLogsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/audit-logs', { params })),
+};
+
+export const NetworkApi = {
+  getStatus: async () => unwrapApiData(await apiClient.get('/api/v1/network/status')),
+};
+
+export const QrApi = {
+  verifyToken: async (token: string) => unwrapApiData(await apiClient.post('/api/v1/qr/verify', { token })),
+  generateToken: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/qr/generate', payload)),
+};
+
+export const ReplacementsApi = {
+  getAll: async (params?: PaginationQuery) => unwrapPaginatedItems(await apiClient.get('/api/v1/replacements', { params })),
+  create: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/replacements', payload)),
+};
+
+export const CommunicationsApi = {
+  sendBroadcast: async (payload: any) => unwrapApiData(await apiClient.post('/api/v1/communications/broadcast', payload)),
+};
+
+export const LabTrackApi = {
+  auth: AuthApi,
+  ai: AiApi,
+  laboratories: LaboratoriesApi,
+  workstations: WorkstationsApi,
+  assets: AssetsApi,
+  pcUsage: PcUsageApi,
+  problemReports: ProblemReportsApi,
+  repairTickets: RepairTicketsApi,
+  maintenance: MaintenanceApi,
+  reservations: ReservationsApi,
+  notifications: NotificationsApi,
+  users: UsersApi,
+  analytics: AnalyticsApi,
+  financials: FinancialsApi,
+  auditLogs: AuditLogsApi,
+  network: NetworkApi,
+  qr: QrApi,
+  replacements: ReplacementsApi,
+  communications: CommunicationsApi,
 };
 
 export default apiClient;
